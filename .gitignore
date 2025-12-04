@@ -1,0 +1,9 @@
+.idea/
+__pycache__/
+*.pkl
+*.pth
+*.pyc
+enhanced_reddit_data/images/
+enhanced_reddit_data/*.json
+enhanced_reddit_data/*.csv
+MISA/src/saved_models/
