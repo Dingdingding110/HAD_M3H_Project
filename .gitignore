@@ -1,11 +1,12 @@
 .idea/
 __pycache__/
-*.pkl
-*.pth
 *.pyc
-enhanced_reddit_data/images/
-enhanced_reddit_data/*.json
-enhanced_reddit_data/*.csv
-temporal_reddit_data/images/
-temporal_reddit_data/*.json
+# 预训练模型权重文件（体积过大，请运行 MISA/src/download_models.py 自动下载）
+*.pth
+*.safetensors
 MISA/src/saved_models/
+# 原始图片数据（体积过大）
+enhanced_reddit_data/images/
+temporal_reddit_data/images/
+# 收集日志
+enhanced_reddit_data/collection.log
