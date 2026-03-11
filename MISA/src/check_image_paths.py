@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import os
-import math
 import pickle
 import json
 import random
@@ -89,7 +88,7 @@ class TemporalDataset(Dataset):
         text_seq  = [torch.tensor(t['text_feat'],  dtype=torch.float32) for t in timeline]
         image_seq = [torch.tensor(t['image_feat'], dtype=torch.float32) for t in timeline]
 
-        # ���� Rich 16-dim temporal behavior features (from per-post timestamps) ������
+        # ── Rich 16-dim temporal behavior features (from per-post timestamps) ───
         # Computed offline in update_behavior_features.py from raw post data.
         # Includes: circadian patterns, late-night ratio, posting rhythm, etc.
         behavior_seq = []
@@ -201,8 +200,7 @@ def confidence_diversity_loss(modal_confidences):
     return entropy.mean()
 
 def train(args):
-    set_seed(args.seed)
-    print(f"[Seed={args.seed}] Starting run...")
+    # set_seed(42) # Commented out to allow randomness for better initialization search
     
     # 1. Config
     # Manually set config values since we are not using the full original config system
@@ -211,20 +209,22 @@ def train(args):
             self.embedding_size = 768 # Text (RoBERTa)
             self.visual_size = 768    # Image (ViT)
             self.acoustic_size = 16   # rich 16-dim temporal behavior (was 4 simple stats)
-            self.hidden_size = 64     # Reduced: 128→64 to combat overfitting on 480 samples
-            self.dropout = 0.65       # Restored: best from Round 1
+            self.hidden_size = 128    # MISA hidden size
+            self.dropout = 0.5
             self.num_classes = 2      # Binary classification (Risk vs Non-Risk)
             self.activation = nn.ReLU
             self.rnncell = 'lstm'
             self.use_bert = False     # We use pre-extracted features
-            # CMD off; keep diff_weight for orthogonality
+            # DIAGNOSTIC MODE: all aux losses disabled to isolate task learning
             self.use_cmd_sim = False
             self.reverse_grad_weight = 1.0
             
-            # Auxiliary loss weights
-            self.diff_weight  = 0.005  # slight orthogonality pressure
+            # Auxiliary loss weights – progressively re-introduced
+            # DiffLoss value ≈ 0.2  → weight 0.1 → ~5% contribution of task loss
+            # ReconLoss value ≈ 1.0 → weight 0.01 → ~3% contribution of task loss
+            self.diff_weight  = 0.001  # diagnostic-only, negligible contribution
             self.recon_weight = 0.0    # disabled
-            self.sim_weight   = 0.0    # CMD disabled
+            self.sim_weight   = 0.0    # CMD similarity (kept off)
             
     config = Config()
     
@@ -265,9 +265,9 @@ def train(args):
     model = TemporalMISA(config).to(DEVICE)
     
     # 4. Optimizer & Loss
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-2)  # Restored: Adam (Round1 best)
-    # CosineAnnealing: smooth LR decay
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-3)
+    # Reduce patience to 5 so LR drops sooner when val acc plateaus
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5)
     
     # Calculate class weights if labels exist
     if label_map:
@@ -284,9 +284,9 @@ def train(args):
         weights = weights / weights.sum()
         print(f"Using class weights: {weights}")
         
-        # label smoothing: 0.15→0.25 for stronger confidence suppression
-        task_criterion = nn.CrossEntropyLoss(label_smoothing=0.25)
-        print("Using CrossEntropyLoss with label_smoothing=0.25")
+        # label smoothing: increased to 0.15 to reduce overconfidence more aggressively
+        task_criterion = nn.CrossEntropyLoss(label_smoothing=0.15)
+        print("Using CrossEntropyLoss with label_smoothing=0.15")
     else:
         task_criterion = nn.CrossEntropyLoss()
     
@@ -299,7 +299,7 @@ def train(args):
     print(f"Starting training for {args.epochs} epochs...")
     best_val_acc = 0.0
     early_stop_counter = 0
-    EARLY_STOP_PATIENCE = 20  # Increased: 15→20 for more exploration
+    EARLY_STOP_PATIENCE = 15  # stop if no improvement for 15 epochs
     
     for epoch in range(args.epochs):
         model.train()
@@ -315,10 +315,10 @@ def train(args):
             text, image, behavior, labels = text.to(DEVICE), image.to(DEVICE), behavior.to(DEVICE), labels.to(DEVICE)
             # lengths stays on CPU (pack_padded_sequence requires CPU lengths)
 
-            # Feature Noise Augmentation (training only) — strengthened to fight memorization
-            text     = text     + torch.randn_like(text)     * 0.08
-            image    = image    + torch.randn_like(image)    * 0.08
-            behavior = behavior + torch.randn_like(behavior) * 0.04
+            # Feature Noise Augmentation (training only)
+            text     = text     + torch.randn_like(text)     * 0.02
+            image    = image    + torch.randn_like(image)    * 0.02
+            behavior = behavior + torch.randn_like(behavior) * 0.01
 
             optimizer.zero_grad()
             
@@ -328,7 +328,7 @@ def train(args):
             modal_conf = outputs['modal_confidences']   # [B, seq_len, 3]
 
             # Calculate Losses
-            # 1. Task Loss
+            # 1. Task Loss (Future Risk Prediction)
             task_loss = task_criterion(future_risk_pred, labels)
 
             # 2. Confidence Diversity Loss (encourage decisive modal weighting)
@@ -338,13 +338,12 @@ def train(args):
             diff_loss, recon_loss, cmd_loss = get_misa_losses(model, config, diff_loss_fn, recon_loss_fn, cmd_loss_fn)
 
             # Total Loss
-            # diff_loss:  private �� shared orthogonality  (~5% of task)
+            # diff_loss:  private ⊥ shared orthogonality  (~5% of task)
             # recon_loss: information reconstruction fidelity (~3% of task)
             # conf_loss:  modality confidence diversity    (fixed 5%)
             loss = (task_loss
                     + config.diff_weight  * diff_loss
                     + config.recon_weight * recon_loss
-                    + config.sim_weight   * cmd_loss
                     + 0.05 * conf_loss)
             
             loss.backward()
@@ -372,7 +371,7 @@ def train(args):
               f"Recon: {recon_loss.item():.4f}(w={recon_contrib:.4f}) | "
               f"CMD: {cmd_val:.4f}")
 
-        # ���� Print avg modal confidence weights (text / image / behavior) ��������������������
+        # ── Print avg modal confidence weights (text / image / behavior) ──────────
         model.eval()
         conf_accum = []
         with torch.no_grad():
@@ -386,21 +385,20 @@ def train(args):
         conf_all = torch.cat(conf_accum, dim=0).mean(dim=0)   # [3]
         print(f"  Modal Weights (val avg) | text={conf_all[0]:.4f}  image={conf_all[1]:.4f}  behavior={conf_all[2]:.4f}")
         model.train()
-        # ������������������������������������������������������������������������������������������������������������������������������������������������������
+        # ───────────────────────────────────────────────────────────────────────────
 
         # Validation
         val_loss, val_acc, val_f1 = validate(model, val_loader, task_criterion)
         
-        # Scheduler step (CosineAnnealing uses epoch count, not val metric)
-        scheduler.step()  # CosineAnnealing by epoch
+        # Scheduler step
+        scheduler.step(val_acc)
         
         # Save best model
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             early_stop_counter = 0
-            save_path = os.path.join(project_root, 'MISA', f'best_model_seed{args.seed}.pth')
+            save_path = os.path.join(project_root, 'MISA', 'best_model.pth')
             torch.save(model.state_dict(), save_path)
-            # Also save as best_model.pth if it's the overall best (handled externally)
             print(f"New best model saved with Val Acc: {val_acc:.2f}%")
         else:
             early_stop_counter += 1
@@ -409,7 +407,6 @@ def train(args):
                 break
 
     print(f"Training complete. Best Validation Accuracy: {best_val_acc:.2f}%")
-    return best_val_acc
 
 def validate(model, val_loader, criterion):
     model.eval()
@@ -476,22 +473,9 @@ def validate(model, val_loader, criterion):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=80)
-    parser.add_argument('--batch_size', type=int, default=8)  # Back to 8: more gradient updates, more stochastic regularization
-    parser.add_argument('--lr', type=float, default=5e-4)  # Restored: best LR from Round 1
-    parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--multi_seed', action='store_true', help='Run with seeds 42, 123, 777 and keep best')
+    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--batch_size', type=int, default=8)
+    parser.add_argument('--lr', type=float, default=1e-3) # Increased default LR
     args = parser.parse_args()
     
-    if args.multi_seed:
-        seeds = [42, 123, 777]
-        overall_best = 0.0
-        for s in seeds:
-            args.seed = s
-            print(f"\n{'='*60}\nRunning with seed={s}\n{'='*60}")
-            best_acc = train(args)
-            if best_acc > overall_best:
-                overall_best = best_acc
-        print(f"\nBest across all seeds: {overall_best:.2f}%")
-    else:
-        train(args)
+    train(args)

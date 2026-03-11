@@ -8,11 +8,11 @@ from transformers import RobertaTokenizer, RobertaModel, ViTImageProcessor, ViTM
 from PIL import Image
 from data_loader import RedditUserDataset
 
-# ÅäÖÃÂ·¾¶
-# ¼ÙÉè½Å±¾ÔËĞĞÔÚ MISA/src/ Ä¿Â¼ÏÂ
+# é…ç½®è·¯å¾„
+# å‡è®¾è„šæœ¬è¿è¡Œåœ¨ MISA/src/ ç›®å½•ä¸‹
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DATA_PATH = os.path.join(PROJECT_ROOT, 'enhanced_reddit_data', 'user_timelines_20251123_114152.json')
-OUTPUT_PATH = os.path.join(PROJECT_ROOT, 'enhanced_reddit_data', 'processed_features.pkl')
+DATA_PATH = os.path.join(PROJECT_ROOT, 'temporal_reddit_data', 'user_timelines_20260305_0113.json')
+OUTPUT_PATH = os.path.join(PROJECT_ROOT, 'temporal_reddit_data', 'processed_features.pkl')
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -20,12 +20,12 @@ class FeatureExtractor:
     def __init__(self):
         print(f"Initializing feature extractor (Device: {DEVICE})...")
         
-        # ¼ì²é±¾µØÄ£ĞÍÂ·¾¶
+        # æ£€æŸ¥æœ¬åœ°æ¨¡å‹è·¯å¾„
         current_dir = os.path.dirname(os.path.abspath(__file__))
         local_roberta = os.path.join(current_dir, 'saved_models', 'roberta-base')
         local_vit = os.path.join(current_dir, 'saved_models', 'vit-base')
         
-        # È·¶¨Ä£ĞÍÀ´Ô´
+        # ç¡®å®šæ¨¡å‹æ¥æº
         roberta_source = local_roberta if os.path.exists(local_roberta) else 'roberta-base'
         vit_source = local_vit if os.path.exists(local_vit) else 'google/vit-base-patch16-224-in21k'
         
@@ -71,14 +71,27 @@ class FeatureExtractor:
 
         valid_images = []
         for path in image_paths:
+            # Normalize path separators
+            path = path.replace('\\', '/')
             # Fix path: dataset paths are relative, need to join with project root
-            full_path = os.path.join(PROJECT_ROOT, path) 
+            full_path = os.path.join(PROJECT_ROOT, path)
+            # Normalize again for OS
+            full_path = os.path.normpath(full_path)
+            
             if os.path.exists(full_path):
                 try:
                     image = Image.open(full_path).convert("RGB")
                     valid_images.append(image)
                 except Exception as e:
                     print(f"Cannot read image {full_path}: {e}")
+            else:
+                # DEBUG: Print first few missing files to help debug
+                if not hasattr(self, '_missing_file_printed'):
+                    print(f"WARNING: Image file not found: {full_path}")
+                    self._missing_file_printed = 0
+                if self._missing_file_printed < 5:
+                    print(f"MISSING: {full_path}")
+                    self._missing_file_printed += 1
         
         if not valid_images:
             return torch.zeros(768).to(DEVICE)

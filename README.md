@@ -89,7 +89,7 @@ class TemporalDataset(Dataset):
         text_seq  = [torch.tensor(t['text_feat'],  dtype=torch.float32) for t in timeline]
         image_seq = [torch.tensor(t['image_feat'], dtype=torch.float32) for t in timeline]
 
-        # ���� Rich 16-dim temporal behavior features (from per-post timestamps) ������
+        # 锟斤拷锟斤拷 Rich 16-dim temporal behavior features (from per-post timestamps) 锟斤拷锟斤拷锟斤拷
         # Computed offline in update_behavior_features.py from raw post data.
         # Includes: circadian patterns, late-night ratio, posting rhythm, etc.
         behavior_seq = []
@@ -211,7 +211,7 @@ def train(args):
             self.embedding_size = 768 # Text (RoBERTa)
             self.visual_size = 768    # Image (ViT)
             self.acoustic_size = 16   # rich 16-dim temporal behavior (was 4 simple stats)
-            self.hidden_size = 64     # Reduced: 128→64 to combat overfitting on 480 samples
+            self.hidden_size = 64     # Reduced: 128鈫�64 to combat overfitting on 480 samples
             self.dropout = 0.65       # Restored: best from Round 1
             self.num_classes = 2      # Binary classification (Risk vs Non-Risk)
             self.activation = nn.ReLU
@@ -284,7 +284,7 @@ def train(args):
         weights = weights / weights.sum()
         print(f"Using class weights: {weights}")
         
-        # label smoothing: 0.15→0.25 for stronger confidence suppression
+        # label smoothing: 0.15鈫�0.25 for stronger confidence suppression
         task_criterion = nn.CrossEntropyLoss(label_smoothing=0.25)
         print("Using CrossEntropyLoss with label_smoothing=0.25")
     else:
@@ -299,7 +299,7 @@ def train(args):
     print(f"Starting training for {args.epochs} epochs...")
     best_val_acc = 0.0
     early_stop_counter = 0
-    EARLY_STOP_PATIENCE = 20  # Increased: 15→20 for more exploration
+    EARLY_STOP_PATIENCE = 20  # Increased: 15鈫�20 for more exploration
     
     for epoch in range(args.epochs):
         model.train()
@@ -315,7 +315,7 @@ def train(args):
             text, image, behavior, labels = text.to(DEVICE), image.to(DEVICE), behavior.to(DEVICE), labels.to(DEVICE)
             # lengths stays on CPU (pack_padded_sequence requires CPU lengths)
 
-            # Feature Noise Augmentation (training only) — strengthened to fight memorization
+            # Feature Noise Augmentation (training only) 鈥� strengthened to fight memorization
             text     = text     + torch.randn_like(text)     * 0.08
             image    = image    + torch.randn_like(image)    * 0.08
             behavior = behavior + torch.randn_like(behavior) * 0.04
@@ -338,7 +338,7 @@ def train(args):
             diff_loss, recon_loss, cmd_loss = get_misa_losses(model, config, diff_loss_fn, recon_loss_fn, cmd_loss_fn)
 
             # Total Loss
-            # diff_loss:  private �� shared orthogonality  (~5% of task)
+            # diff_loss:  private 锟斤拷 shared orthogonality  (~5% of task)
             # recon_loss: information reconstruction fidelity (~3% of task)
             # conf_loss:  modality confidence diversity    (fixed 5%)
             loss = (task_loss
@@ -372,7 +372,7 @@ def train(args):
               f"Recon: {recon_loss.item():.4f}(w={recon_contrib:.4f}) | "
               f"CMD: {cmd_val:.4f}")
 
-        # ���� Print avg modal confidence weights (text / image / behavior) ��������������������
+        # 锟斤拷锟斤拷 Print avg modal confidence weights (text / image / behavior) 锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷
         model.eval()
         conf_accum = []
         with torch.no_grad():
@@ -386,7 +386,7 @@ def train(args):
         conf_all = torch.cat(conf_accum, dim=0).mean(dim=0)   # [3]
         print(f"  Modal Weights (val avg) | text={conf_all[0]:.4f}  image={conf_all[1]:.4f}  behavior={conf_all[2]:.4f}")
         model.train()
-        # ������������������������������������������������������������������������������������������������������������������������������������������������������
+        # 锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷
 
         # Validation
         val_loss, val_acc, val_f1 = validate(model, val_loader, task_criterion)

@@ -31,7 +31,8 @@ class RedditUserDataset(Dataset):
                 'scores': [],
                 'num_comments': [],
                 'post_count': 0,
-                'timestamps': []
+                'timestamps': [],
+                'post_details': []   # NEW: per-post (hour, weekday, score, utc)
             })
 
             for post in posts:
@@ -55,6 +56,13 @@ class RedditUserDataset(Dataset):
                 group['num_comments'].append(post.get('num_comments', 0))
                 group['post_count'] += 1
                 group['timestamps'].append(dt.hour) # Record posting hour for activity analysis
+                # NEW: store per-post detail for within-week LSTM
+                group['post_details'].append({
+                    'hour': dt.hour,
+                    'weekday': dt.weekday(),    # 0=Mon, 6=Sun
+                    'score': post.get('score', 0),
+                    'utc': dt.timestamp(),
+                })
 
             # 2. Filter users with insufficient data
             if len(weekly_groups) < min_weeks:
@@ -77,7 +85,8 @@ class RedditUserDataset(Dataset):
                         'total_comments': np.sum(week_data['num_comments']),
                         'post_count': week_data['post_count'],
                         'active_hours': np.mean(week_data['timestamps']) # Average posting hour
-                    }
+                    },
+                    'post_details': week_data['post_details'],  # NEW: list of per-post dicts
                 })
             
             self.data.append({
